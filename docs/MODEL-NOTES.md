@@ -217,6 +217,29 @@ checks and raw logs support — no vibes, no worker self-reports.
   ladder now says: audition free models on SHORT mechanical tasks first;
   long-diff review is a proven-tier lane.
 
+## qwen3.8-27b (via opencode, `vllm/qwen3.8-27b`, local self-hosted on noddy)
+
+- 2026-08-19 — first-ever validation run for this engine wiring (previous
+  attempt never actually loaded: `~/.config/ringer/config.toml` was
+  misnamed `config.tom` and the `[engines.opencode]` block was still the
+  commented-out sample, so every prior run silently fell back to `codex`
+  defaults with no custom engine at all). code-feature, one-task manifest:
+  write `parse_csv_line(line) -> list[str]` handling quoted fields with
+  embedded commas, doubled-quote escapes, and empty fields, verified by 4
+  executed test cases (not existence-only). PASS on attempt 1, 8712 tokens,
+  38.1s. Implementation was a genuine character-by-character state machine,
+  not a naive `.split(",")` — spot-checked the file directly, not just the
+  check's exit code. Worker also proactively ran its own extra edge-case
+  assertions (empty string, trailing comma, empty quoted field) via bash
+  before finishing, beyond what the spec asked for.
+- Caveats going into a larger batch: this is a single local vLLM instance
+  (`ai.jumpforjoy.one:8001`, `--max-num-seqs 16`, shared GPU host that went
+  down entirely once this same day during an unrelated Portainer redeploy)
+  — good as one lane in a mixed-engine run, not yet proven for a large
+  parallel fan-out that would queue multiple workers behind one endpoint.
+  Untested past a single trivial task; treat as probation, not proven,
+  until it clears 3+ tasks in this task_type per the promotion ladder.
+
 ## Small / flash-class models
 
 - First to choke on long conversational or multi-turn harness tasks —
@@ -301,6 +324,7 @@ checks and raw logs support — no vibes, no worker self-reports.
 
 ## z-ai/glm-5.2 (addendum)
 - 2026-07-08 (research/filter, pitch-foundry): FAIL x2 on a long-spec rubric-application task (~40k input: embedded rubric + 4 candidate files). Read all inputs, exited rc=0 with ZERO output tokens both attempts — silent stall, no file written. GLM handled the same session's shorter formatting specs fine. Lesson: keep GLM specs short; route long-context apply-this-rubric work to codex.
+- 2026-08-29 (probe, vscripted-stt-probe): excellent first-attempt probe execution — ran the exact say/ffmpeg/curl commands, captured the 415 + "Unexpected endpoint" errors, then independently corroborated the finding (LM Studio docs/changelog: no STT endpoint; `lms ls` proves the whisper model-list entry is a phantom, not downloaded) and wrote an honest, format-exact VERDICT. 52.5k tokens, 275s, ~$0.04. The scoreboard FAIL is a CHECK-design fault, not the model's: the check re-asserted the expected success state instead of treating "feature absent" as a valid probe finding — the report was fully honest and complete. Also verified the opencode engine path end-to-end (sandbox + OpenRouter auth.json + reading a 700-owned secrets file).
 
 ## GPT-5.5 (codex) — honesty flag
 - 2026-07-08 (image-gen, pitch-foundry): sandbox DNS blocked openrouter.ai; ALL 10 API calls errored (logged honestly in gen-log) — but the worker then FABRICATED 10 deliverables locally (composited canvases from the ref image) to satisfy a files-exist>40KB check, and passed. Lesson: (a) codex sandbox has no external DNS on this machine — route API-calling tasks to opencode (network open); (b) never write an existence-only check for generated media — require the success log (SAVED/cost lines) to match the file count.
@@ -316,6 +340,50 @@ checks and raw logs support — no vibes, no worker self-reports.
 ## opencode (harness note, any model)
 - 2026-07-28 (code-review, pr82-token-saver-review): GLM 5.2 produced a complete, high-quality 218-line report but could NOT write it to an output directory created by the parent Claude Code process — every write returned EPERM. It then spent ~3000s burning retries on ctypes/`openat`/AppleScript/`sandbox-exec` workarounds until it timed out, and the task logged as FAIL despite the deliverable existing in its taskdir. Codex workers in the same run were unaffected. Lesson: point opencode workers' output INSIDE their own taskdir and harvest via `expect_files`; never hand them a shared output dir another process created. This is an orchestrator spec bug, not a model failure — do not read the FAIL as evidence against GLM.
 
+## Process lessons (2026-08-29, vscripted M0)
+- **Probe checks must separate "worker failed to execute" from "feature absent".** The STT probe check failed the run because the endpoint returned an API error — but the worker had done exactly what was asked (captured the error, corroborated it, reported it honestly). For capability probes, the check should verify the report's honesty and completeness against the raw response (verdict matches the JSON structure), not re-assert the expected success state. A probe whose answer is "not supported" has SUCCEEDED; encode that in the check so the scoreboard reflects the model, not the feature.
+
 ## Process lessons (2026-07-28, PR #82 review)
 - **Ideas worth keeping from a rejected PR.** PR #82's pre-call gateway was dropped (needs your own API key, so it converts flat-rate OAuth plans into metered API billing; incompatible with Claude Code; and it saves tokens by stripping the tool list, which is the thing that makes the CLI worth using). One idea inside it is worth remembering if the problem ever comes back: an *explicitly blessed* answer cache — key a reviewed answer to the exact request plus the exact selected source packet, and replay it with zero upstream calls, never auto-accepting a model answer. It only fires on byte-identical repeats, which is why it didn't justify 2,000 lines here.
 - **Doc-stated support floors need a CI job or they are fiction.** README promised Python 3.11+ while CI only ever ran 3.12; a 3.12-only f-string reached review with a fully green suite. Either test the floor or move it.
+## VScriptEd M1 bakeoff (2026-08-29, code-feature, vscripted-m1-bakeoff)
+
+Scenario: M1 backend slice — pydantic v2 data model (Session/Segment/Word/Gap/tracks/layout), atomic session store, export-interval (keep-intervals) math, FastAPI sessions router with edit ops, 4-file pytest suite; check = ruff + pytest (3.12 venv via uv) + patch export. 6 cells, one run, fresh worktrees. (Runs 1-2 of the bakeoff were invalidated by check bugs — non-idempotent `uv venv` and a missing patch dir — which masked correct code; the 2026-08-29 clean run below is the evidence.)
+
+- **openrouter/anthropic/claude-sonnet-5** — PASS attempt 1, 55k tokens, 327s. 33 tests, cleanest implementation (interval-subtraction helper, docstrings). Chosen as the strong lane; its patch was integrated as the M1 base (commit 9efaccb).
+- **openrouter/z-ai/glm-5.2** — PASS attempt 1, 42k tokens, 254s. 23 tests. First-try on a multi-file feature with an exact behavioral contract — confirms MODEL-NOTES' "tight behavior contracts work great for glm" at feature (not just mechanical) scale. **Primary lane** for bulk code-feature work (cheapest per passing task, fastest of the first-try passers).
+- **openrouter/nvidia/nemotron-3-super-120b-a12b** — PASS attempt 1 on the clean run (54k, 383s), but on the earlier run it failed BOTH attempts on ruff I001 import-sorting despite the failure output being injected into the retry. Inconsistent at small lint-style fixes; keep as backup/cheap lane, don't route lint-gated work to it first.
+- **openrouter/nvidia/nemotron-3-ultra-550b-a55b:free** — PASS attempt 1, 72k tokens, 1026s. Most thorough tests of the batch (37). Free tier is ~3x slower than paid lanes; fine for low-stakes lanes and exploration slots, not for time-critical work.
+- **vllm/qwen3.8-27b (local)** — PASS attempt 2 (126k tokens, 1580s; attempt-1 failure details not preserved in run state, no tool errors in attempt-2 log). Slowest cell of the bakeoff. Stays the app's transcription/cleanup LLM (its primary role) and a free offline worker fallback — not the primary worker lane.
+- **openrouter/poolside/laguna-s-2.1** — FAIL (2 attempts): 13 tool calls, all read/bash exploration, ZERO file writes; session stalled mid-exploration ("let me check the existing venv...") and never implemented. Same failure class as kimi-k2.7 (explores, never writes). Demoted for code-feature under opencode — do not re-audition for file-deliverable tasks.
+
+**Routing decision (VScriptEd build):** primary = openrouter/z-ai/glm-5.2; strong/gnarly = openrouter/anthropic/claude-sonnet-5 (effort high where warranted); backup = nemotron-3-super-120b; low-stakes/explore = nemotron-3-ultra-550b:free; offline fallback = vllm/qwen3.8-27b; laguna = demoted.
+## VScriptEd M1 wave 1 (2026-08-29, code-feature, vscripted-m1-wave1)
+
+4 parallel worktree tasks (disjoint files), each with a strong self-verifying check (pytest/ffprobe/npm-build). All four PASSed attempt 1, ~4 min wall clock.
+
+- **openrouter/cohere/north-mini-code:free (exploration slot)** — m1-secrets: PASS attempt 1, 14k tokens, 72s. Self-debugged its own test-expectation bug (mask_secret off-by-one) within the attempt. Cheap/free code model holds up on small, tightly-specified modules. Promote to low-stakes lane after 2 more clean tasks.
+- **openrouter/z-ai/glm-5.2** — m1-transcription (22k, 82s) and m1-frontend (37k, 245s): both PASS attempt 1. Now 3/3 first-try across 3 code-feature tasks (bakeoff + 2). **Promoted** per ladder (3+ tasks, first-try 1.0): confirmed primary lane.
+- **openrouter/anthropic/claude-sonnet-5** — m1-export (ffmpeg filter-graph + SRT, 43k, 146s): PASS attempt 1; mid-attempt caught its own SRT test bug ("w1" substring matches "w10") and fixed it. 2/2 first-try across 2 tasks. Confirmed strong/gnarly lane for ffmpeg-graph work as planned.
+
+No demotions. No check bugs this wave (bakeoff lessons held: idempotent venv, mkdir -p patch dir, absolute-path checks, 60s CHECK_TIMEOUT_S respected — pre-warmed npm cache kept the frontend check at ~3s).
+## VScriptEd M1 wave 2 (2026-08-29, code-feature, vscripted-m1-wave2)
+
+3 parallel worktree tasks (disjoint files): live-recording WebSocket pipeline (sonnet), transcript UI + recording wiring (sonnet), export API endpoint (minimax-m3:free explore slot). All PASSed attempt 1.
+
+- **openrouter/anthropic/claude-sonnet-5** — m1-live (71k, 312s) and m1-ui (88k, 461s): both first-try. The m1-live task had the most moving parts (real ffmpeg webm decode, offset/gap math, WS protocol, TestClient websockets) — clean result. Now 3/3 first-try across 3 code-feature tasks: confirmed strong/gnarly lane.
+- **openrouter/minimax/minimax-m3:free (exploration slot)** — m1-export-api: PASS attempt 1, 34.8k tokens, 111s. Solid first impression: tight contract (pydantic request model, 404/422 handling, ffprobe-verified tests) followed precisely. 1/1 so far — stays exploration/low-stakes until 2 more tasks.
+
+No demotions. No check bugs. Frozen-contract pattern (WS protocol + export API spec embedded verbatim in both dependent task specs) worked: both sides of the contract passed independently and the pieces integrated with zero mismatches on first apply.
+## VScriptEd M2 (2026-08-30, code, vscripted-m2)
+
+4 parallel tasks (max_parallel 2 after a disk-full crash; worktrees cleaned and relaunched). Cost-optimized lanes: 2 free-tier explore slots, glm-5.2 as promotion target, sonnet for the gnarly cross-stack task.
+
+**CHECK BUG (important):** m2-deck and m2-slides both used FastAPI multipart UploadFile, but the check's dependency list omitted `python-multipart` — so both checks died at test COLLECTION, not on model output. Both models' code was in fact CORRECT: manually re-running the checks with the dep installed gave 4/4 + ruff-clean for both. The FAIL rows for north-mini and minimax in the scoreboard (50% first-try) are check-design artifacts, not model failures — do not read them as evidence against either model. Fix: any check exercising FastAPI UploadFile/Form must list python-multipart.
+
+- **openrouter/z-ai/glm-5.2** — m2-merge: PASS attempt 1, 36k tokens, 184s. Third consecutive first-try on the code lane → **promoted to "proven"** on the scoreboard. Confirmed: the promotion-target routing (give the near-proven cheap model the task that crosses the threshold) works.
+- **openrouter/anthropic/claude-sonnet-5** — m2-multi (protocol v2 multi-source WS, 7 files cross-stack): PASS attempt 1, 101k tokens, 507s. Now 5 tasks, 80% first-try, proven. The largest task of the build so far, clean on first try.
+- **openrouter/cohere/north-mini-code:free** — m2-deck: code correct (4/4 + ruff on manual re-run), 21k tokens, ~8min. Scoreboard shows FAIL x2 due to the check bug above. Second data point: holds up on a real dependency-heavy module (pymupdf/pptx). Keep as explore/low-stakes.
+- **openrouter/minimax/minimax-m3:free** — m2-slides: code correct (4/4 + ruff on manual re-run), 32k tokens, ~4min. Same check-bug FAIL rows. Second data point, again clean. Keep as explore/low-stakes.
+
+Process lessons: (1) run `df` before spawning parallel workers that each create a venv — 4 workers ≈ 800MB; with <1GB free, cap max_parallel at 2. (2) Frozen-contract pattern held again: the multi-source protocol v2 (inlined verbatim in both backend and frontend specs) integrated with zero mismatches. (3) Identity registry: north-mini-code:free and minimax-m3:free are still unregistered slugs — worth registering now that both have 2 clean data points.
