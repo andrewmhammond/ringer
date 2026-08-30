@@ -387,3 +387,14 @@ No demotions. No check bugs. Frozen-contract pattern (WS protocol + export API s
 - **openrouter/minimax/minimax-m3:free** — m2-slides: code correct (4/4 + ruff on manual re-run), 32k tokens, ~4min. Same check-bug FAIL rows. Second data point, again clean. Keep as explore/low-stakes.
 
 Process lessons: (1) run `df` before spawning parallel workers that each create a venv — 4 workers ≈ 800MB; with <1GB free, cap max_parallel at 2. (2) Frozen-contract pattern held again: the multi-source protocol v2 (inlined verbatim in both backend and frontend specs) integrated with zero mismatches. (3) Identity registry: north-mini-code:free and minimax-m3:free are still unregistered slugs — worth registering now that both have 2 clean data points.
+## VScriptEd M3 (2026-08-30, code, vscripted-m3)
+
+4 parallel tasks (max_parallel 2): silence/filler removal (glm-5.2), media import (sonnet-5), sentence-level UI editing (glm-5.2), VTT export (minimax-m3:free). All four PASSed attempt 1; all patches applied to the main tree with zero conflicts; 121 tests + ruff + tsc/oxlint clean.
+
+- **openrouter/z-ai/glm-5.2** — m3-silence (38.5k, 187s) and m3-sentences (33.6k, 193s): both first-try. Now 5/5 code tasks first-try (scoreboard: proven, 100%). Note: m3-sentences is frontend-only (React sentence grouping, drag-vs-click selection state, remove-fillers button) — GLM handled the subtle interaction logic (draggedRef to distinguish drag from click) cleanly on first try. GLM is now the workhorse for both backend and frontend tasks.
+- **openrouter/anthropic/claude-sonnet-5** — m3-import (85.5k, 293s): first-try. Cross-stack (ffprobe/ffmpeg import pipeline, Whisper batch transcribe, multipart API, Home.tsx wiring). Now 6 code tasks, 83% first-try, proven.
+- **openrouter/minimax/minimax-m3:free** — m3-vtt (22k, 40s): first-try, fastest cell of the wave. Three data points now, 67% first-try (the two FAIL rows remain M2 check-bug artifacts). The 40s VTT render shows free-tier latency is fine for small, tightly-contracted tasks. Keep as explore/low-stakes; a 3rd clean task would justify low-stakes promotion.
+
+Budget: ~$2.80 OpenRouter remaining after M3 (m3-import ~$0.45; everything else free/cheap). Cost-optimized routing (free-tier bulk + glm insurance + sonnet for gnarly) held up: the wave cost less than one sonnet task alone.
+
+Process lessons: (1) `git apply --check` per patch before applying catches the rare cross-task file overlap (none this wave; m3-import and m3-sentences both touched frontend/src/api.ts but in disjoint regions and applied cleanly). (2) Keep max_parallel 2 as the default on this machine — 4 parallel venvs still risk the disk-full crash. (3) Ringer's post-run summary table (task/status/verdict/attempts/tokens/elapsed_s) is the authoritative record for the notes — pull it from the run log tail.
