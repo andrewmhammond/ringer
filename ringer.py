@@ -51,8 +51,8 @@ ENV_VAR_PREFIX = "RINGER"
 CONFIG_DIR_NAME = TOOL_NAME
 CONFIG_FILE_NAME = "config.toml"
 DEFAULT_ENGINE_NAME = "codex"
-DEFAULT_TIMEOUT_S = 900
-CHECK_TIMEOUT_S = 60
+DEFAULT_TIMEOUT_S = 1800
+CHECK_TIMEOUT_S = 300
 DEFAULT_DASHBOARD_PORT_BASE = 8787
 DEFAULT_HUD_PORT = 8700
 DEFAULT_CATALOG_SOURCE = "https://openrouter.ai/api/v1/models"
@@ -9088,11 +9088,27 @@ class RingerRunner:
             log_fh = log_path.open("ab")
         except OSError as exc:
             return WorkerResult(returncode=None, timed_out=False, tokens=None, error=str(exc))
+        worker_env = os.environ.copy()
+        if engine.process_name == "opencode":
+            # opencode keeps one global SQLite db (~/.local/share/opencode/opencode.db)
+            # with PRAGMA busy_timeout=0, so parallel workers hitting it at once fail
+            # instantly with "database is locked" (upstream: not planned to fix --
+            # https://github.com/anomalyco/opencode/issues/21215). Give each task its
+            # own XDG_DATA_HOME so its opencode.db never collides with a sibling task's.
+            oc_data_dir = runtime.log_path.parent.parent / "oc-data" / runtime.task.key / "opencode"
+            oc_data_dir.mkdir(parents=True, exist_ok=True)
+            task_auth = oc_data_dir / "auth.json"
+            if not task_auth.exists():
+                shared_auth = Path(worker_env.get("XDG_DATA_HOME", str(Path.home() / ".local" / "share"))) / "opencode" / "auth.json"
+                with contextlib.suppress(OSError):
+                    shutil.copy2(shared_auth, task_auth)
+            worker_env["XDG_DATA_HOME"] = str(oc_data_dir.parent)
         async with AsyncFileCloser(log_fh):
             try:
                 proc = await asyncio.create_subprocess_exec(
                     *cmd,
                     cwd=str(runtime.taskdir),
+                    env=worker_env,
                     stdin=asyncio.subprocess.DEVNULL,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.STDOUT,
