@@ -239,6 +239,91 @@ checks and raw logs support — no vibes, no worker self-reports.
   parallel fan-out that would queue multiple workers behind one endpoint.
   Untested past a single trivial task; treat as probation, not proven,
   until it clears 3+ tasks in this task_type per the promotion ladder.
+- 2026-08-31 — VScriptEd M7 wave-1 (3 parallel code-feature tasks, real
+  production integration work, not toy tasks): `m7-rewrite` (new
+  `backend/rewrite.py`, mirror an existing file's httpx.Client/system-prompt
+  conventions exactly, 7 tests via httpx.MockTransport) PASSED attempt 1,
+  clean. `m7-voice-extract` (new `backend/voice_extract.py` + extend an
+  existing FastAPI router with one endpoint, reuse two existing private
+  helpers from another module correctly, real-ffmpeg atrim/concat filter
+  graph, 10 tests) PASSED on attempt 2 — attempt 1's failure was `uv venv
+  --clear` hitting a macOS "directory not empty" race, unrelated to the
+  model's code; spot-checked both patches directly (not just exit codes):
+  correct reuse of the pointed-to helpers, no scope creep outside the
+  files-you-own list, no dead code. This clears the 3-task promotion
+  threshold for code-feature with 2/2 genuinely correct, spec-faithful
+  results (plus the one earlier trivial-task pass) — promote past
+  "probation" for this task_type, still worth another batch before "proven"
+  tier given the small n.
+  `m7-tts-service` (new isolated micro-service dir, coqui-tts/XTTS v2 voice
+  cloning, own venv) technically recorded FAIL, but this was a Ringer
+  infra bug, not the model: the check re-created the venv and reinstalled
+  torch/transformers/coqui-tts from scratch every attempt, and separately
+  `CHECK_TIMEOUT_S = 60` (hardcoded in ringer.py, not manifest-configurable)
+  is far too short for any check that loads a real ML model — a bare
+  `pytest` run against an *already-installed* env still took 41-98s here
+  just for model load + one real synthesis call. Verified by hand after the
+  run: the worker's code (lazy-singleton model load mirroring this repo's
+  own established pattern, correct `/voices`/`/synthesize` contract, correct
+  error paths) was fully correct — all 6 real-model tests (real XTTS
+  voice-cloning synthesis, ffprobe duration + PCM-amplitude non-silence
+  check, 404/422 paths) passed once given a working venv, only 2 trivial
+  ruff nits (a `File(...)` B008 already `# noqa`'d elsewhere in this repo,
+  and one `tempfile` context-manager nit). Lesson for check authors on
+  ANY task that loads a real model (embeddings, STT, TTS, vision, etc.):
+  do not put `uv venv`/`pip install` inside the 60s check step at all —
+  make venv creation + install + a full green self-test part of the
+  worker's own job (inside its much larger `timeout_s`), and have the
+  check only re-run the fast subset (or, if even a bare model-load is
+  >60s, accept that this class of task needs an orchestrator hand-review
+  pass after the run rather than a fully-automated check — that is what
+  happened here and it worked, just isn't hands-off).
+- 2026-08-31 — VScriptEd polish-wave-1 (3 parallel code-feature tasks,
+  Settings UI backend + wiring + frontend): `settings-wiring` and
+  `settings-frontend` PASSED attempt 1. `settings-store` recorded FAIL x2,
+  **but this is a spec bug, not a model failure**: the spec (correctly)
+  required a `try/except Exception` on a "must never 500, only report
+  ok:false" endpoint, but never mentioned this repo's existing
+  `# noqa: BLE001` convention for exactly this shape of deliberate broad
+  catch (there IS repo precedent — `# noqa: B008` on a comparable
+  deliberately-flagged line in `backend/api/slides_api.py` — the spec just
+  didn't point the worker at it here, unlike other patterns in the same
+  spec that it *did* explicitly mirror). Checked the worker's own log for
+  both attempts: it never ran `ruff` on its own code either time, so it had
+  no way to discover the need for the suppression comment on its own.
+  Fixed by hand after the run: added the one `# noqa: BLE001` line,
+  re-ran ruff + all 13 of the worker's own tests — clean, no other issues,
+  same pattern as the M2 `python-multipart` check-bug entry above. The FAIL
+  rows this leaves in the scoreboard for this task_type are a check-design
+  artifact (missing instruction + no self-check requirement in the spec),
+  not evidence against the model. Lesson for future specs on this
+  codebase: when a spec requires a deliberately-broad exception catch,
+  either point the worker at the existing `# noqa` precedent explicitly (as
+  done for other mirrored patterns in the same spec) or instruct it to run
+  `ruff check` on its own output before finishing — telling it to write
+  the correct broad catch isn't enough on its own.
+- 2026-08-31 — settings-store-retry (one-task re-run of the above, spec
+  corrected per the lesson just above): FAIL x2 again, **neither one a
+  model failure either** — both are orchestrator/environment artifacts
+  unrelated to the fix being retried:
+  - Attempt 1: `uv venv --clear` hit the same macOS "directory not empty"
+    (os error 66) race already on file for `m7-voice-extract` above —
+    worker exited rc=0, check never got past venv creation.
+  - Attempt 2: worker exited rc=0, **ruff clean, all 13 tests passed**
+    ("All checks passed! ... 13 passed, 1 warning in 1.41s") — the spec fix
+    worked. It still recorded FAIL because `git diff --cached > patch`
+    produced an EMPTY patch: I (the orchestrator) had already hand-applied
+    and committed this exact code to `main` between round 1 and this retry,
+    so the retry's worktree started from a HEAD that already contained
+    `backend/settings_store.py` / `backend/api/settings_api.py` — there was
+    nothing left to diff. Self-inflicted sequencing mistake: verify a spec
+    fix in isolation (stash/revert the already-merged target files first,
+    or run the retry BEFORE integrating) rather than after the fix is
+    already live in the tree the check diffs against.
+  Net result: the noqa/self-check spec fix is confirmed correct (clean
+  ruff + 13/13 tests, twice now — once by hand, once fully automated) even
+  though no row in the scoreboard shows a clean PASS for it. Do not read
+  `settings-store-retry`'s FAIL rows as evidence against qwen3.8-27b.
 
 ## Small / flash-class models
 
