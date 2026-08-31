@@ -9089,12 +9089,20 @@ class RingerRunner:
         except OSError as exc:
             return WorkerResult(returncode=None, timed_out=False, tokens=None, error=str(exc))
         worker_env = os.environ.copy()
-        if engine.process_name == "opencode":
+        if engine.name == "opencode":
             # opencode keeps one global SQLite db (~/.local/share/opencode/opencode.db)
             # with PRAGMA busy_timeout=0, so parallel workers hitting it at once fail
             # instantly with "database is locked" (upstream: not planned to fix --
             # https://github.com/anomalyco/opencode/issues/21215). Give each task its
             # own XDG_DATA_HOME so its opencode.db never collides with a sibling task's.
+            # NOTE: matches on engine.name (the manifest/config engine key), not
+            # engine.process_name -- the real bin is opencode-sandboxed.sh, a wrapper,
+            # so process_name would never equal "opencode" and this would silently
+            # never fire. RINGER_OC_DATA_DIR also tells that wrapper's Seatbelt
+            # profile to allow writes here (see opencode-sandboxed.sh) -- without it,
+            # the sandbox only permits writes under the shared ~/.local/share/opencode,
+            # so setting XDG_DATA_HOME alone would just move where opencode tries to
+            # write without the sandbox permitting it there.
             oc_data_dir = runtime.log_path.parent.parent / "oc-data" / runtime.task.key / "opencode"
             oc_data_dir.mkdir(parents=True, exist_ok=True)
             task_auth = oc_data_dir / "auth.json"
@@ -9103,6 +9111,7 @@ class RingerRunner:
                 with contextlib.suppress(OSError):
                     shutil.copy2(shared_auth, task_auth)
             worker_env["XDG_DATA_HOME"] = str(oc_data_dir.parent)
+            worker_env["RINGER_OC_DATA_DIR"] = str(oc_data_dir)
         async with AsyncFileCloser(log_fh):
             try:
                 proc = await asyncio.create_subprocess_exec(

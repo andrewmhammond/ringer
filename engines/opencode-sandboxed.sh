@@ -39,6 +39,13 @@ fi
 
 TASKDIR_REAL="$(cd "$TASKDIR" && pwd -P)"
 
+# Per-task OpenCode data dir (ringer.py sets RINGER_OC_DATA_DIR so parallel
+# tasks don't share one opencode.db and hit SQLite lock contention); falls
+# back to the shared default for manual/non-ringer invocations.
+OC_SHARE_DIR="${RINGER_OC_DATA_DIR:-$HOME/.local/share/opencode}"
+mkdir -p "$OC_SHARE_DIR"
+OC_SHARE_DIR="$(cd "$OC_SHARE_DIR" && pwd -P)"
+
 # Per-run scratch root — becomes both TMPDIR and XDG_CACHE_HOME for OpenCode, so
 # we never have to open all of /private/tmp or ~/.cache to the sandboxed agent.
 # Resolve to the real path (/var/folders symlinks to /private/var/folders);
@@ -78,7 +85,7 @@ set +e
 /usr/bin/sandbox-exec \
   -D "TASKDIR=$TASKDIR_REAL" \
   -D "SCRATCH=$SCRATCH" \
-  -D "OC_SHARE=$HOME/.local/share/opencode" \
+  -D "OC_SHARE=$OC_SHARE_DIR" \
   -D "OC_STATE=$HOME/.local/state/opencode" \
   -D "OC_CONFIG=$HOME/.config/opencode" \
   -f "$PROFILE" "$OPENCODE_BIN" "$@" < /dev/null
