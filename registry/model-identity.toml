@@ -106,6 +106,20 @@ confidence = "verified"
 source = "local vLLM server http://ai.jumpforjoy.one:8001/v1/models serves 'qwen3.8-27b'; opencode provider config display 'Qwen3.8 27B (131k)' (verified 2026-08-29)"
 last_verified = 2026-08-29
 
+[engines.opencode.models."local-llama/qwen3.8-9b"]
+display = "Qwen3.8 9B Q4_K_M (local llama.cpp, pygmy)"
+lab = "Qwen (Alibaba)"
+confidence = "verified"
+source = "HF repo empero-ai/Qwen3.8-9B-GGUF: a full-parameter distillation of Qwen3.8 2.4T A95B into the Qwen3.5-9B architecture (same lineage as vllm/qwen3.8-27b above, distilled to 9B by empero-ai); local llama-server on pygmy (127.0.0.1:8901) loads Qwen3.8-9B-Q4_K_M.gguf, --ctx-size 32768 (verified 2026-09-16)"
+last_verified = 2026-09-16
+
+[engines.opencode.models."local-llama-macbookair/qwen3.8-9b-gguf"]
+display = "Qwen3.8 9B Q4_K_M (local llama.cpp, macbookair-m5)"
+lab = "Qwen (Alibaba)"
+confidence = "verified"
+source = "Same artifact as local-llama/qwen3.8-9b above (empero-ai/Qwen3.8-9B-GGUF distillation of Qwen3.8 2.4T A95B into Qwen3.5-9B), same file, run on a second machine (macbookair-m5) via a local llama-server reached over Tailscale at 100.97.42.21:8081, --ctx-size 32768, --reasoning-budget 4096 (verified 2026-09-16)"
+last_verified = 2026-09-16
+
 [engines.opencode.models."openrouter/poolside/laguna-s-2.1"]
 display = "Laguna S 2.1"
 lab = "Poolside"
